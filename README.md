@@ -1,6 +1,6 @@
 # PROSPEX
 
-AI-powered weekly financial and regulatory briefing platform for Dutch FinTech SMEs. Connects to Xero accounting, monitors EU/NL regulatory sources, and generates plain-language briefings via Groq LLM — no finance jargon.
+AI-powered weekly financial and regulatory briefing platform for Dutch FinTech SMEs. Connects to Xero accounting, monitors EU/NL regulatory sources, and generates plain-language briefings via Groq LLM — no finance jargon, no fluff.
 
 ## What it does
 
@@ -8,7 +8,8 @@ Each week, for every connected company:
 1. Pulls the latest P&L, balance sheet, and cash position from Xero
 2. Scores 5 financial health dimensions (liquidity, profitability, runway, receivables, trend)
 3. Retrieves relevant regulatory updates (GDPR, AML, DORA, MiCA, PSD2) via semantic search
-4. Generates a briefing translated into plain language — with concrete action items, no fluff
+4. Generates a plain-language briefing with concrete action items and deadlines
+5. Surfaces everything through a clean dashboard with light/dark mode
 
 ## Stack
 
@@ -19,7 +20,7 @@ Each week, for every connected company:
 | Embeddings | BGE-base-en-v1.5 (sentence-transformers, CPU) |
 | LLM | Groq API (llama-3.3-70b-versatile) |
 | Accounting | Xero API (OAuth2 PKCE) |
-| Frontend | Next.js (Module 7 — in progress) |
+| Frontend | Next.js 14, Tailwind CSS, shadcn/ui |
 
 ## Project structure
 
@@ -27,18 +28,24 @@ Each week, for every connected company:
 prospex/
 ├── backend/
 │   ├── agent/          # LLM provider, prompts, briefing pipeline
+│   ├── api/            # FastAPI route definitions
 │   ├── db/             # Supabase client, schema SQL
 │   ├── rag/            # Regulation retriever (pgvector cosine search)
 │   ├── regulations/    # Scraper (AFM, EBA, EUR-Lex), filter, embedder
+│   ├── scheduler/      # Weekly APScheduler job
 │   ├── scoring/        # Financial scoring engine + benchmarks
 │   ├── xero/           # OAuth2 auth, data pull, parser
 │   ├── tests/          # Per-module verification scripts
+│   ├── main.py         # FastAPI app entry point
 │   ├── requirements.txt
 │   └── config.py
-└── frontend/           # Next.js app (coming in Module 7)
+└── frontend/
+    ├── app/            # Next.js App Router pages
+    ├── components/     # UI components (shadcn/ui + custom)
+    └── lib/            # Typed API client, helpers
 ```
 
-## Setup
+## Backend setup
 
 ### Prerequisites
 - Python 3.10+
@@ -56,7 +63,7 @@ pip install -r requirements.txt
 Create `backend/.env`:
 ```env
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_KEY=your-service-role-key
+SUPABASE_ANON_KEY=your-anon-key
 XERO_CLIENT_ID=your-xero-client-id
 XERO_CLIENT_SECRET=your-xero-client-secret
 XERO_REDIRECT_URI=https://your-ngrok-url/callback
@@ -64,9 +71,11 @@ GROQ_API_KEY=your-groq-api-key
 ```
 
 ### 3. Set up the database
-Run these in the Supabase SQL Editor (in order):
+Run these in the Supabase SQL Editor in order:
 - `backend/db/schema.sql` — creates the 4 core tables
 - `backend/db/schema_rag.sql` — creates the pgvector similarity search function
+
+Disable row-level security on all 4 tables (Supabase dashboard → Table Editor → RLS).
 
 ### 4. Connect Xero
 ```bash
@@ -80,15 +89,41 @@ python xero/pull.py
 
 ### 5. Scrape and embed regulations
 ```bash
-python regulations/scraper.py
-python regulations/embedder.py
+python regulations/scraper.py   # fetch from AFM, EBA, EUR-Lex
+python regulations/embedder.py  # chunk + embed (downloads ~440 MB model on first run)
 ```
 
-### 6. Generate a briefing
-Edit `tests/test_briefing.py` with your company ID, then:
+### 6. Start the backend
 ```bash
-python tests/test_briefing.py
+uvicorn main:app --reload --port 8000
 ```
+
+The scheduler runs automatically every Monday at 07:00 Amsterdam time. To trigger manually, use the dashboard or call `POST /companies/{id}/briefings/generate`.
+
+## Frontend setup
+
+### Prerequisites
+- Node.js 20+
+
+### 1. Install dependencies
+```bash
+cd frontend
+npm install
+```
+
+### 2. Configure environment
+Create `frontend/.env.local`:
+```env
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_COMPANY_ID=your-company-uuid
+```
+
+### 3. Start the dev server
+```bash
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000).
 
 ## Module status
 
@@ -99,12 +134,13 @@ python tests/test_briefing.py
 | 3 | Financial scoring engine | Done |
 | 4 | Regulation scraper + RAG | Done |
 | 5 | LLM briefing agent | Done |
-| 6 | FastAPI + scheduler | In progress |
-| 7 | Next.js dashboard | Pending |
+| 6 | FastAPI + scheduler | Done |
+| 7 | Next.js dashboard | Done |
 
 ## Notes
 
-- `.env` is git-ignored — never commit secrets
-- The BGE model downloads ~440 MB on first run of `embedder.py`
-- Xero Demo Company does not support aged receivables (401) — skipped gracefully
-- Groq falls back through a model list if the primary is unavailable; if Groq is unreachable entirely, a template briefing is generated from raw scores
+- `.env` and `.env.local` are git-ignored — never commit secrets
+- Xero Demo Company does not support aged receivables (401) — this is skipped gracefully
+- BGE model downloads ~440 MB on first run of `embedder.py`
+- Groq falls back through a model list if the primary model is unavailable; if Groq is unreachable entirely, a deterministic template briefing is generated from raw scores so the user is never shown an empty page
+- Regulatory filter ignores EBA procedural documents (RTS/ITS/supervisory peer reviews) — only flags GDPR, AML, DORA, MiCA, and PSD2 which are the regulations that actually require SME action
