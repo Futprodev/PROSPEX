@@ -19,7 +19,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ── PASTE YOUR COMPANY ID HERE ──────────────────────────────────────────────
-COMPANY_ID = "d130a27a-2923-467f-bcbe-c12a0b98ce1c"
+COMPANY_ID = "c7777254-7d79-4e37-927f-651ddf7d4cbc"
 # ────────────────────────────────────────────────────────────────────────────
 
 from agent.briefing import generate_briefing

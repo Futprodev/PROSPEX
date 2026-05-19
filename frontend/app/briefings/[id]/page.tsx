@@ -9,6 +9,7 @@ import {
 import { HealthScoreCard } from "@/components/health-score-card";
 import { DimensionBreakdown } from "@/components/dimension-breakdown";
 import { BriefingSections } from "@/components/briefing-sections";
+import { PrintButton } from "@/components/print-button";
 
 const COMPANY_ID = process.env.NEXT_PUBLIC_COMPANY_ID ?? "";
 
@@ -27,18 +28,21 @@ export default async function BriefingDetailPage({ params }: Props) {
 
   return (
     <div className="space-y-6">
-      {/* Back navigation */}
-      <div className="flex items-center gap-4">
-        <Link
-          href="/briefings"
-          className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          ← Briefing History
-        </Link>
-        <span className="text-muted-foreground">·</span>
-        <span className="text-sm text-muted-foreground">
-          {formatDate(briefing.week_of ?? briefing.generated_at)}
-        </span>
+      {/* Back navigation + print */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <Link
+            href="/briefings"
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            ← Briefing History
+          </Link>
+          <span className="text-muted-foreground">·</span>
+          <span className="text-sm text-muted-foreground">
+            {formatDate(briefing.week_of ?? briefing.generated_at)}
+          </span>
+        </div>
+        <PrintButton />
       </div>
 
       {/* Content grid */}

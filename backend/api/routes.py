@@ -106,6 +106,65 @@ def get_latest_briefing(company_id: str):
     return result.data[0]
 
 
+@router.get("/companies/{company_id}/snapshots/latest/monthly")
+def get_monthly_trends(company_id: str):
+    """
+    Returns monthly revenue + operating expenses for the last 11 months from
+    the most recent Xero pull. Used by the dashboard revenue/expense chart.
+    """
+    _validate_uuid(company_id)
+
+    snap = (
+        get_client()
+        .table("financial_snapshots")
+        .select("raw_xero_data, pulled_at")
+        .eq("company_id", company_id)
+        .order("pulled_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if not snap.data:
+        raise HTTPException(status_code=404, detail="No financial snapshot found")
+
+    raw = snap.data[0].get("raw_xero_data") or {}
+    pl_raw = raw.get("pl") or {}
+
+    from xero.parse import parse_financial_data
+    parsed = parse_financial_data(raw)
+
+    # Extract month labels from the P&L header row
+    months = []
+    try:
+        report = pl_raw.get("Reports", [{}])[0]
+        rows = report.get("Rows", [])
+        header = next((r for r in rows if r.get("RowType") == "Header"), None)
+        if header:
+            cells = header.get("Cells", [])
+            months = [c.get("Value", "") for c in cells[1:] if c.get("Value")]
+    except (KeyError, IndexError, TypeError, AttributeError):
+        pass
+
+    revenue  = parsed.get("monthly_revenue_trend") or []
+    expenses = parsed.get("monthly_expense_trend") or []
+
+    # Truncate everything to the shortest array so the chart has aligned points
+    n = min(len(months), len(revenue), len(expenses)) if months else min(len(revenue), len(expenses))
+    if not months:
+        # Fallback: synthesise month labels backward from snapshot date
+        import datetime
+        end = datetime.date.fromisoformat(snap.data[0]["pulled_at"][:10])
+        months = []
+        for i in range(n):
+            m = end.replace(day=1) - datetime.timedelta(days=30 * (n - 1 - i))
+            months.append(m.strftime("%b %y"))
+
+    return {
+        "months":   months[:n],
+        "revenue":  revenue[:n],
+        "expenses": expenses[:n],
+    }
+
+
 @router.get("/companies/{company_id}/briefings/{briefing_id}")
 def get_briefing(company_id: str, briefing_id: str):
     _validate_uuid(company_id)

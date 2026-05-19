@@ -121,6 +121,27 @@ export async function getBriefingById(
   }
 }
 
+export interface MonthlyTrends {
+  months: string[];
+  revenue: number[];
+  expenses: number[];
+}
+
+export async function getMonthlyTrends(
+  companyId: string
+): Promise<MonthlyTrends | null> {
+  try {
+    const res = await fetch(
+      `${API_URL}/companies/${companyId}/snapshots/latest/monthly`,
+      { cache: "no-store" }
+    );
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
 export async function generateBriefing(companyId: string): Promise<boolean> {
   try {
     const res = await fetch(

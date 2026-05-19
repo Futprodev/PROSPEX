@@ -3,6 +3,7 @@ import {
   getCompany,
   getLatestBriefing,
   getBriefings,
+  getMonthlyTrends,
   parseBriefingText,
   parseDimensions,
   formatDate,
@@ -12,13 +13,16 @@ import { HealthScoreCard } from "@/components/health-score-card";
 import { DimensionBreakdown } from "@/components/dimension-breakdown";
 import { BriefingSections } from "@/components/briefing-sections";
 import { GenerateButton } from "@/components/generate-button";
+import { ScoreTrendChart } from "@/components/score-trend-chart";
+import { RevenueExpenseChart } from "@/components/revenue-expense-chart";
 const COMPANY_ID = process.env.NEXT_PUBLIC_COMPANY_ID ?? "";
 
 export default async function DashboardPage() {
-  const [company, briefing, history] = await Promise.all([
+  const [company, briefing, history, trends] = await Promise.all([
     getCompany(COMPANY_ID),
     getLatestBriefing(COMPANY_ID),
     getBriefings(COMPANY_ID, 8),
+    getMonthlyTrends(COMPANY_ID),
   ]);
 
   if (!company) {
@@ -55,6 +59,11 @@ export default async function DashboardPage() {
         <GenerateButton companyId={COMPANY_ID} />
       </div>
 
+      {/* Full-width revenue/expense chart at top */}
+      {trends && trends.months.length > 0 && (
+        <RevenueExpenseChart trends={trends} />
+      )}
+
       {briefing && parsed ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
 
@@ -72,6 +81,7 @@ export default async function DashboardPage() {
               score={briefing.health_score}
               previousScore={previousScore}
             />
+            <ScoreTrendChart history={history} />
             <DimensionBreakdown dimensions={dimensions} />
 
             {/* Recent briefings — lives here, not at the bottom */}

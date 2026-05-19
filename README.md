@@ -11,6 +11,17 @@ Each week, for every connected company:
 4. Generates a plain-language briefing with concrete action items and deadlines
 5. Surfaces everything through a clean dashboard with light/dark mode
 
+## Dashboard features
+
+- **Health score card** — current score, week-over-week delta, colour-coded
+- **Score trend chart** — line chart of historical health scores
+- **Revenue vs expenses chart** — 11-month bar chart pulled from Xero P&L
+- **Dimension breakdown** — coloured bars for each of the 5 financial dimensions with insight text
+- **Weekly briefing** — three sections (Financial Alerts, Regulatory Updates, This Week's Actions) with accented borders per section
+- **Briefing history** — past briefings in the sidebar plus a full History page
+- **PDF export** — print-friendly view of any briefing for sharing or filing
+- **Dark / light mode** — toggle in the header, respects system preference, persists across sessions
+
 ## Stack
 
 | Layer | Technology |
@@ -20,7 +31,7 @@ Each week, for every connected company:
 | Embeddings | BGE-base-en-v1.5 (sentence-transformers, CPU) |
 | LLM | Groq API (llama-3.3-70b-versatile) |
 | Accounting | Xero API (OAuth2 PKCE) |
-| Frontend | Next.js 14, Tailwind CSS, shadcn/ui |
+| Frontend | Next.js 14, Tailwind CSS, shadcn/ui, Recharts, next-themes |
 
 ## Project structure
 
@@ -144,3 +155,20 @@ Open [http://localhost:3000](http://localhost:3000).
 - BGE model downloads ~440 MB on first run of `embedder.py`
 - Groq falls back through a model list if the primary model is unavailable; if Groq is unreachable entirely, a deterministic template briefing is generated from raw scores so the user is never shown an empty page
 - Regulatory filter ignores EBA procedural documents (RTS/ITS/supervisory peer reviews) — only flags GDPR, AML, DORA, MiCA, and PSD2 which are the regulations that actually require SME action
+- The revenue/expense chart shows up to 11 months of P&L (Xero's API limit for a single monthly query). For more history, the Xero call would need to be split into multiple sequential pulls — planned as a follow-up feature
+
+## Roadmap
+
+Implemented:
+- Score trend chart
+- Revenue vs expenses chart
+- PDF export of briefings
+
+Planned:
+- Multi-year historical P&L (sequential Xero pulls)
+- Email delivery of the weekly briefing
+- Multi-company support with a company switcher
+- Xero connect/reconnect through the UI
+- "Ask your data" chat input on the dashboard
+- Cash flow forecasting (3/6/12 months out)
+- Benchmark comparison vs industry averages
