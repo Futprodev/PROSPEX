@@ -347,6 +347,152 @@ def get_benchmarks(company_id: str):
     }
 
 
+# ── Hero metrics + week-over-week deltas ─────────────────────────────────────
+
+def _reparse_snapshot(snap_row):
+    """
+    Re-runs the parser on the snapshot's stored raw_xero_data so we can access
+    fields that aren't in the financial_snapshots columns (expense categories,
+    debtor list, monthly net profit, etc.).
+    """
+    raw = snap_row.get("raw_xero_data") or {}
+    if not isinstance(raw, dict) or not raw:
+        return {}
+    try:
+        from xero.parse import parse_financial_data
+        return parse_financial_data(raw)
+    except Exception:
+        return {}
+
+
+def _pct_change(current, previous):
+    """Returns the % change, or None if it can't be computed."""
+    if current is None or previous is None:
+        return None
+    if previous == 0:
+        return None
+    return round(((current - previous) / abs(previous)) * 100, 1)
+
+
+@router.get("/companies/{company_id}/hero-metrics")
+def get_hero_metrics(company_id: str):
+    """
+    Returns the headline numbers a founder wants at a glance:
+      - Cash today + delta vs previous snapshot
+      - Runway (months)
+      - Monthly burn + delta vs previous
+      - Income this month + MoM change
+      - Net profit this month + MoM change
+      - DSO + delta
+      - Health score (latest briefing) + delta vs previous briefing
+    """
+    _validate_uuid(company_id)
+    client = get_client()
+
+    snaps = (
+        client.table("financial_snapshots")
+        .select("*")
+        .eq("company_id", company_id)
+        .order("pulled_at", desc=True)
+        .limit(2)
+        .execute()
+        .data
+    )
+    if not snaps:
+        raise HTTPException(status_code=404, detail="No snapshot yet")
+
+    latest   = snaps[0]
+    previous = snaps[1] if len(snaps) > 1 else None
+    parsed   = _reparse_snapshot(latest)
+
+    # Income / expenses / net profit for the current vs previous calendar month
+    income_now  = parsed.get("current_month_revenue")
+    income_prev = parsed.get("previous_month_revenue")
+    net_now     = parsed.get("current_month_net_profit")
+    net_prev    = parsed.get("previous_month_net_profit")
+
+    # Briefing health scores (latest two)
+    briefings = (
+        client.table("briefings")
+        .select("health_score, generated_at")
+        .eq("company_id", company_id)
+        .order("generated_at", desc=True)
+        .limit(2)
+        .execute()
+        .data
+    )
+    score_now  = briefings[0]["health_score"] if briefings else None
+    score_prev = briefings[1]["health_score"] if len(briefings) > 1 else None
+
+    return {
+        "cash":                 latest.get("cash"),
+        "cash_delta":           (latest.get("cash") or 0) - (previous.get("cash") or 0) if previous else None,
+        "runway_months":        latest.get("runway_months"),
+        "burn":                 latest.get("monthly_burn"),
+        "burn_delta_pct":       _pct_change(latest.get("monthly_burn"), previous.get("monthly_burn") if previous else None),
+        "dso_days":             latest.get("dso_days"),
+        "dso_delta":            (latest.get("dso_days") - previous.get("dso_days")) if previous and latest.get("dso_days") is not None and previous.get("dso_days") is not None else None,
+        "income_this_month":    income_now,
+        "income_change_pct":    _pct_change(income_now, income_prev),
+        "net_profit_this_month": net_now,
+        "net_profit_change_pct": _pct_change(net_now, net_prev),
+        "health_score":         score_now,
+        "health_score_delta":   (score_now - score_prev) if score_now is not None and score_prev is not None else None,
+    }
+
+
+# ── Top debtors (who owes me) ────────────────────────────────────────────────
+
+@router.get("/companies/{company_id}/debtors")
+def get_debtors(company_id: str, limit: int = 10):
+    """Returns the top N debtors by total AR balance."""
+    _validate_uuid(company_id)
+    limit = max(1, min(50, limit))
+
+    snap = (
+        get_client()
+        .table("financial_snapshots")
+        .select("raw_xero_data")
+        .eq("company_id", company_id)
+        .order("pulled_at", desc=True)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not snap:
+        raise HTTPException(status_code=404, detail="No snapshot to read debtors from")
+
+    parsed  = _reparse_snapshot(snap[0])
+    debtors = parsed.get("debtors") or []
+    return {"debtors": debtors[:limit], "total_count": len(debtors)}
+
+
+# ── Expense category breakdown ───────────────────────────────────────────────
+
+@router.get("/companies/{company_id}/expense-categories")
+def get_expense_categories(company_id: str, limit: int = 8):
+    """Returns the top N expense categories by total spend over the period."""
+    _validate_uuid(company_id)
+    limit = max(1, min(50, limit))
+
+    snap = (
+        get_client()
+        .table("financial_snapshots")
+        .select("raw_xero_data")
+        .eq("company_id", company_id)
+        .order("pulled_at", desc=True)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not snap:
+        raise HTTPException(status_code=404, detail="No snapshot for expense breakdown")
+
+    parsed = _reparse_snapshot(snap[0])
+    categories = parsed.get("expense_categories") or []
+    return {"categories": categories[:limit], "total_count": len(categories)}
+
+
 # ── Cash flow forecast ───────────────────────────────────────────────────────
 
 @router.get("/companies/{company_id}/forecast")
@@ -544,20 +690,28 @@ def delete_company(company_id: str):
 
 # ── Ask your data (LLM chat) ─────────────────────────────────────────────────
 
+class ChatMessage(BaseModel):
+    role:    str   # "user" | "assistant"
+    content: str
+
+
 class AskRequest(BaseModel):
     question: str
+    history:  list[ChatMessage] | None = None
 
 
 @router.post("/companies/{company_id}/ask")
 def ask_question(company_id: str, payload: AskRequest):
     """
-    Single-turn LLM chat over the company's most recent snapshot and briefing.
-    No conversation state — each question is independent.
+    LLM chat over the company's most recent snapshot, briefing, expense
+    breakdown, and debtor list. Accepts optional conversation history so the
+    user can ask follow-up questions ("tell me more", "why is that").
     """
     _assert_company_exists(company_id)
 
     from agent.chat import answer_question
-    answer = answer_question(company_id, payload.question)
+    history = [h.model_dump() for h in payload.history] if payload.history else None
+    answer = answer_question(company_id, payload.question, history=history)
     return {"answer": answer}
 
 

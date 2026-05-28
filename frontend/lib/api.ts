@@ -249,6 +249,89 @@ export async function getBenchmarks(
   }
 }
 
+// ── Hero metrics + week-over-week deltas ──────────────────────────────────
+
+export interface HeroMetrics {
+  cash:                    number | null;
+  cash_delta:              number | null;
+  runway_months:           number | null;
+  burn:                    number | null;
+  burn_delta_pct:          number | null;
+  dso_days:                number | null;
+  dso_delta:               number | null;
+  income_this_month:       number | null;
+  income_change_pct:       number | null;
+  net_profit_this_month:   number | null;
+  net_profit_change_pct:   number | null;
+  health_score:            number | null;
+  health_score_delta:      number | null;
+}
+
+export async function getHeroMetrics(companyId: string): Promise<HeroMetrics | null> {
+  try {
+    const res = await fetch(`${API_URL}/companies/${companyId}/hero-metrics`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+// ── Debtors ────────────────────────────────────────────────────────────────
+
+export interface Debtor {
+  name:           string;
+  current:        number;
+  overdue_30:     number;
+  overdue_60:     number;
+  overdue_90:     number;
+  overdue_older:  number;
+  overdue_total:  number;
+  total:          number;
+}
+
+export async function getDebtors(companyId: string, limit = 5): Promise<Debtor[]> {
+  try {
+    const res = await fetch(
+      `${API_URL}/companies/${companyId}/debtors?limit=${limit}`,
+      { cache: "no-store" }
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.debtors ?? [];
+  } catch {
+    return [];
+  }
+}
+
+// ── Expense categories ─────────────────────────────────────────────────────
+
+export interface ExpenseCategory {
+  name:        string;
+  total:       number;
+  current:     number;
+  avg_monthly: number;
+}
+
+export async function getExpenseCategories(
+  companyId: string,
+  limit = 8
+): Promise<ExpenseCategory[]> {
+  try {
+    const res = await fetch(
+      `${API_URL}/companies/${companyId}/expense-categories?limit=${limit}`,
+      { cache: "no-store" }
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.categories ?? [];
+  } catch {
+    return [];
+  }
+}
+
 // ── Cash flow forecast ─────────────────────────────────────────────────────
 
 export interface ForecastPoint {
@@ -316,15 +399,21 @@ export async function deleteCompany(companyId: string): Promise<boolean> {
 
 // ── Ask-your-data chat ─────────────────────────────────────────────────────
 
+export interface ChatHistoryEntry {
+  role:    "user" | "assistant";
+  content: string;
+}
+
 export async function askQuestion(
   companyId: string,
-  question: string
+  question:  string,
+  history?:  ChatHistoryEntry[]
 ): Promise<string | null> {
   try {
     const res = await fetch(`${API_URL}/companies/${companyId}/ask`, {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ question }),
+      body:    JSON.stringify({ question, history: history ?? [] }),
     });
     if (!res.ok) return null;
     const data = await res.json();

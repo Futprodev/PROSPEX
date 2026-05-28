@@ -38,6 +38,16 @@ class GroqProvider(LLMProvider):
         self.model  = model or self.DEFAULT_MODELS[0]
 
     def generate(self, system_prompt, user_prompt):
+        return self.generate_messages([
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_prompt},
+        ])
+
+    def generate_messages(self, messages):
+        """
+        Multi-turn variant — accepts a full messages array, used by the chat
+        endpoint so prior turns are visible to the LLM.
+        """
         last_error = None
         models_to_try = [self.model] + [m for m in self.DEFAULT_MODELS if m != self.model]
 
@@ -45,26 +55,21 @@ class GroqProvider(LLMProvider):
             try:
                 response = self.client.chat.completions.create(
                     model=model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user",   "content": user_prompt},
-                    ],
+                    messages=messages,
                     max_tokens=1500,
                     temperature=0.3,
                     timeout=30,
                 )
                 if model != self.model:
                     print(f"   ℹ️  Using Groq model {model} (primary unavailable)")
-                    self.model = model  # remember for next call
+                    self.model = model
                 return response.choices[0].message.content.strip()
             except Exception as e:
                 last_error = e
                 msg = str(e).lower()
-                # If the error is "model deprecated" or "model not found", try next
                 if "model" in msg and ("deprec" in msg or "not found" in msg or "decommis" in msg):
                     print(f"   ⚠️  Groq model {model} unavailable, trying next...")
                     continue
-                # Other errors (auth, network) — stop trying alternates
                 raise
 
         raise RuntimeError(f"All Groq models failed. Last error: {last_error}")

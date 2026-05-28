@@ -6,6 +6,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { CompanyMenu } from "@/components/company-menu";
 import { TaskProgressProvider } from "@/components/task-progress-provider";
 import { ProgressBanner } from "@/components/progress-banner";
+import { AgentChat } from "@/components/agent-chat";
 import { getCompany } from "@/lib/api";
 import { getActiveCompanyId } from "@/lib/company";
 import "./globals.css";
@@ -62,6 +63,18 @@ export default async function RootLayout({
                     Dashboard
                   </Link>
                   <Link
+                    href="/briefing"
+                    className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Briefing
+                  </Link>
+                  <Link
+                    href="/financials"
+                    className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Financials
+                  </Link>
+                  <Link
                     href="/briefings"
                     className="text-sm text-muted-foreground hover:text-foreground transition-colors"
                   >
@@ -88,6 +101,9 @@ export default async function RootLayout({
           <main className="flex-1 max-w-6xl mx-auto w-full px-6 py-8">
             {children}
           </main>
+
+          {/* Floating chat — appears bottom-right whenever a company is connected */}
+          {company && <AgentChat companyId={company.id} />}
          </TaskProgressProvider>
         </ThemeProvider>
       </body>

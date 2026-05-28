@@ -40,6 +40,44 @@ def _find_row_by_title(rows, title):
     return None
 
 
+def _find_section_child_rows(rows, section_titles):
+    """
+    Finds a section row whose title contains any of `section_titles`, and
+    returns its direct child Row entries (skipping nested sections/headers).
+    Used to enumerate expense categories or per-debtor lines.
+    """
+    titles_lower = [t.lower() for t in section_titles]
+    for row in rows:
+        if row.get("RowType") == "Section":
+            section_title = row.get("Title", "")
+            if not section_title:
+                cells = row.get("Cells", [])
+                section_title = cells[0].get("Value", "") if cells else ""
+            if any(t in section_title.lower() for t in titles_lower):
+                return [r for r in row.get("Rows", []) if r.get("RowType") == "Row"]
+        # Recurse into nested rows
+        nested = _find_section_child_rows(row.get("Rows", []), section_titles)
+        if nested:
+            return nested
+    return []
+
+
+def _to_float(raw):
+    """Robust float parse used across category and debtor parsing."""
+    if raw in ("", None):
+        return 0.0
+    try:
+        cleaned = str(raw).replace(",", "").replace(" ", "").strip()
+        negative = cleaned.startswith("(") and cleaned.endswith(")")
+        cleaned = cleaned.strip("()")
+        if cleaned in ("", "-"):
+            return 0.0
+        v = float(cleaned)
+        return -v if negative else v
+    except (ValueError, AttributeError):
+        return 0.0
+
+
 def _cell_value(row, cell_index=1):
     """
     Extracts a numeric value from a specific cell in a row.
@@ -355,6 +393,116 @@ def _parse_ar(ar_raw):
 
 
 # ---------------------------------------------------------------------------
+# Expense category breakdown
+# ---------------------------------------------------------------------------
+
+def _parse_expense_categories(pl_raw):
+    """
+    Enumerates each category row inside the operating-expenses section and
+    returns its total spend across the reporting window plus the most recent
+    month's value. Used by the dashboard's expense-breakdown card.
+    """
+    if not pl_raw:
+        return []
+    report = _get_report(pl_raw)
+    if not report:
+        return []
+    rows = report.get("Rows", [])
+
+    section_rows = _find_section_child_rows(
+        rows,
+        ["less operating expenses", "operating expenses", "expenses"],
+    )
+
+    categories = []
+    for r in section_rows:
+        cells = r.get("Cells", [])
+        if len(cells) < 2:
+            continue
+        name = cells[0].get("Value", "").strip()
+        if not name:
+            continue
+
+        # Xero returns monthly columns newest-first. Reverse so [-1] is current.
+        monthly = []
+        for cell in cells[1:]:
+            v = _to_float(cell.get("Value", ""))
+            monthly.append(abs(v))
+        monthly = list(reversed(monthly))
+
+        if not monthly:
+            continue
+        non_zero = [v for v in monthly if v > 0]
+        if not non_zero:
+            continue
+
+        categories.append({
+            "name":        name,
+            "total":       round(sum(monthly), 2),
+            "current":     round(monthly[-1], 2),
+            "avg_monthly": round(sum(non_zero) / len(non_zero), 2),
+        })
+
+    # Sort by total descending so the biggest spend categories are first
+    categories.sort(key=lambda c: c["total"], reverse=True)
+    return categories
+
+
+# ---------------------------------------------------------------------------
+# Per-debtor list (Aged Receivables)
+# ---------------------------------------------------------------------------
+
+def _parse_debtors(ar_raw):
+    """
+    Returns a list of debtors with their AR balance broken into aging buckets.
+    Skips totals/summary rows.
+    """
+    if not ar_raw:
+        return []
+    report = _get_report(ar_raw)
+    if not report:
+        return []
+    rows = report.get("Rows", [])
+
+    debtors = []
+
+    def visit(rs):
+        for r in rs:
+            row_type = r.get("RowType")
+            if row_type == "Row":
+                cells = r.get("Cells", [])
+                if len(cells) >= 6:
+                    name = (cells[0].get("Value", "") or "").strip()
+                    if not name or name.lower() in ("total", "totals"):
+                        # fall through to recurse into nested rows
+                        pass
+                    else:
+                        current = _to_float(cells[1].get("Value", ""))
+                        d30     = _to_float(cells[2].get("Value", ""))
+                        d60     = _to_float(cells[3].get("Value", ""))
+                        d90     = _to_float(cells[4].get("Value", ""))
+                        older   = _to_float(cells[5].get("Value", "")) if len(cells) > 6 else 0.0
+                        total   = _to_float(cells[-1].get("Value", ""))
+                        if total > 0:
+                            debtors.append({
+                                "name":           name,
+                                "current":        round(current, 2),
+                                "overdue_30":     round(d30, 2),
+                                "overdue_60":     round(d60, 2),
+                                "overdue_90":     round(d90, 2),
+                                "overdue_older":  round(older, 2),
+                                "overdue_total":  round(d60 + d90 + older, 2),
+                                "total":          round(total, 2),
+                            })
+            visit(r.get("Rows", []))
+
+    visit(rows)
+    # Sort by total balance descending — biggest exposure first
+    debtors.sort(key=lambda d: d["total"], reverse=True)
+    return debtors
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -390,6 +538,31 @@ def parse_financial_data(raw_data):
     else:
         result["dso_days"] = None
         all_errors.append("dso_days: missing accounts_receivable or annual_revenue")
+
+    # Monthly net profit trend = revenue - expenses month by month
+    rev_trend = result.get("monthly_revenue_trend") or []
+    exp_trend = result.get("monthly_expense_trend") or []
+    np_trend = []
+    for i in range(min(len(rev_trend), len(exp_trend))):
+        np_trend.append(round(rev_trend[i] - exp_trend[i], 2))
+    result["monthly_net_profit_trend"] = np_trend
+
+    # Snapshot of the current month so the hero strip can render without
+    # re-traversing raw_xero_data each time
+    result["current_month_revenue"]    = rev_trend[-1] if rev_trend else None
+    result["current_month_expenses"]   = exp_trend[-1] if exp_trend else None
+    result["current_month_net_profit"] = np_trend[-1]   if np_trend  else None
+
+    # Previous month for MoM comparison
+    result["previous_month_revenue"]    = rev_trend[-2] if len(rev_trend) > 1 else None
+    result["previous_month_expenses"]   = exp_trend[-2] if len(exp_trend) > 1 else None
+    result["previous_month_net_profit"] = np_trend[-2]  if len(np_trend)  > 1 else None
+
+    # Expense category breakdown (current period total + per-month avg)
+    result["expense_categories"] = _parse_expense_categories(raw_data.get("pl"))
+
+    # Per-debtor breakdown for the "who owes me" card
+    result["debtors"] = _parse_debtors(raw_data.get("ar"))
 
     result["parse_errors"] = all_errors
 
