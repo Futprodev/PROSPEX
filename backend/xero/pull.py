@@ -184,8 +184,13 @@ def pull_bank_transactions(company_id):
 
 def pull_all(company_id):
     """
-    Calls all four pullers and returns a combined dict.
-    If one call fails, logs it and continues — never crashes the whole pipeline.
+    Calls all four pullers, parses the result, and persists a snapshot row
+    so downstream code (briefing generation, charts, forecast, benchmarks)
+    has data to read.
+
+    Returns the raw blob (useful for callers that want to inspect it).
+    Never crashes the pipeline — partial pulls still get saved as long as
+    at least one report came back.
     """
     print(f"\nPulling all Xero data for company {company_id}...")
 
@@ -201,6 +206,22 @@ def pull_all(company_id):
 
     print(f"\n   {pulled}/4 reports pulled successfully"
           + (f", {skipped} failed (check logs above)" if skipped else ""))
+
+    # Parse + persist. If everything failed (pulled == 0) skip the save —
+    # an empty snapshot is worse than no snapshot.
+    if pulled == 0:
+        print("   ⚠️  No reports succeeded — skipping snapshot save")
+        return raw
+
+    try:
+        from xero.parse import parse_financial_data
+        parsed = parse_financial_data(raw)
+        # Stash the raw blob so the briefing pipeline can re-derive trend
+        # arrays without another Xero call
+        parsed["_raw"] = raw
+        save_snapshot(company_id, parsed)
+    except Exception as e:
+        print(f"   ❌ Failed to save snapshot: {e}")
 
     return raw
 

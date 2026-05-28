@@ -3,6 +3,11 @@ import { Inter } from "next/font/google";
 import Link from "next/link";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { CompanyMenu } from "@/components/company-menu";
+import { TaskProgressProvider } from "@/components/task-progress-provider";
+import { ProgressBanner } from "@/components/progress-banner";
+import { getCompany } from "@/lib/api";
+import { getActiveCompanyId } from "@/lib/company";
 import "./globals.css";
 
 const inter = Inter({
@@ -16,11 +21,16 @@ export const metadata: Metadata = {
     "Financial and regulatory briefing platform for Dutch FinTech SMEs",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Resolve the active company once at the layout level so the header menu
+  // and the dashboard share a single source of truth.
+  const companyId = await getActiveCompanyId();
+  const company   = companyId ? await getCompany(companyId) : null;
+
   return (
     <html
       lang="en"
@@ -37,6 +47,7 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
+         <TaskProgressProvider>
           <header className="border-b sticky top-0 z-10 bg-background/95 backdrop-blur">
             <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between">
               <div className="flex items-center gap-8">
@@ -58,13 +69,26 @@ export default function RootLayout({
                   </Link>
                 </nav>
               </div>
-              <ThemeToggle />
+              <div className="flex items-center gap-2">
+                {company && (
+                  <CompanyMenu
+                    companyId={company.id}
+                    companyName={company.name}
+                    industry={company.industry}
+                    country={company.country}
+                  />
+                )}
+                <ThemeToggle />
+              </div>
             </div>
           </header>
+
+          <ProgressBanner />
 
           <main className="flex-1 max-w-6xl mx-auto w-full px-6 py-8">
             {children}
           </main>
+         </TaskProgressProvider>
         </ThemeProvider>
       </body>
     </html>

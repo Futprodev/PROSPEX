@@ -17,6 +17,9 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 # --- App ---
 APP_ENV = os.getenv("APP_ENV", "development")
+# Where the OAuth callback should redirect the browser back to after a successful
+# Xero connection. Defaults to the local Next.js dev server.
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 _REQUIRED = {
     "XERO_CLIENT_ID": (XERO_CLIENT_ID, "Xero developer portal → your app → Client ID"),

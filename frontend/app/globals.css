@@ -135,6 +135,16 @@
     color-scheme: light;
   }
 
+  /* Preserve background colours, gradients, and SVG fills in print output.
+     Without this Chrome strips backgrounds — which silently hides Recharts
+     area fills, gradient defs, and any coloured bars. */
+  *,
+  *::before,
+  *::after {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust:         exact !important;
+  }
+
   /* Hide nav, buttons, and any element with .no-print */
   header,
   nav,
@@ -168,5 +178,21 @@
 
   .grid > * {
     margin-bottom: 1rem;
+  }
+
+  /* Recharts ResponsiveContainer measures the parent via ResizeObserver, which
+     doesn't fire during print rasterisation — the SVG can end up with 0 height.
+     Force an explicit size so the chart renders in the PDF. */
+  .recharts-responsive-container {
+    width: 100% !important;
+    height: 240px !important;
+    min-height: 240px !important;
+  }
+
+  .recharts-wrapper,
+  .recharts-surface {
+    width: 100% !important;
+    height: 100% !important;
+    overflow: visible !important;
   }
 }

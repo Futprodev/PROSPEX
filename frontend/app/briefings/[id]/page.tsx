@@ -10,8 +10,7 @@ import { HealthScoreCard } from "@/components/health-score-card";
 import { DimensionBreakdown } from "@/components/dimension-breakdown";
 import { BriefingSections } from "@/components/briefing-sections";
 import { PrintButton } from "@/components/print-button";
-
-const COMPANY_ID = process.env.NEXT_PUBLIC_COMPANY_ID ?? "";
+import { getActiveCompanyId } from "@/lib/company";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -19,7 +18,8 @@ interface Props {
 
 export default async function BriefingDetailPage({ params }: Props) {
   const { id } = await params;
-  const briefing = await getBriefingById(COMPANY_ID, id);
+  const companyId = await getActiveCompanyId();
+  const briefing = await getBriefingById(companyId, id);
 
   if (!briefing) notFound();
 

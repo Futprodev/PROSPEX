@@ -4,43 +4,38 @@ import {
   getLatestBriefing,
   getBriefings,
   getMonthlyTrends,
+  getForecast,
   parseBriefingText,
   parseDimensions,
   formatDate,
   scoreColor,
 } from "@/lib/api";
+import { getActiveCompanyId } from "@/lib/company";
 import { HealthScoreCard } from "@/components/health-score-card";
 import { DimensionBreakdown } from "@/components/dimension-breakdown";
 import { BriefingSections } from "@/components/briefing-sections";
-import { GenerateButton } from "@/components/generate-button";
 import { ScoreTrendChart } from "@/components/score-trend-chart";
 import { RevenueExpenseChart } from "@/components/revenue-expense-chart";
-const COMPANY_ID = process.env.NEXT_PUBLIC_COMPANY_ID ?? "";
+import { CashForecastChart } from "@/components/cash-forecast-chart";
+import { BenchmarkCard } from "@/components/benchmark-card";
+import { AskData } from "@/components/ask-data";
+import { ConnectXeroScreen } from "@/components/connect-xero-screen";
 
 export default async function DashboardPage() {
-  const [company, briefing, history, trends] = await Promise.all([
-    getCompany(COMPANY_ID),
-    getLatestBriefing(COMPANY_ID),
-    getBriefings(COMPANY_ID, 8),
-    getMonthlyTrends(COMPANY_ID),
-  ]);
+  const companyId = await getActiveCompanyId();
+  const company   = companyId ? await getCompany(companyId) : null;
 
+  // No company configured yet → invite the user to connect Xero
   if (!company) {
-    return (
-      <div className="flex flex-col items-center justify-center py-32 text-center gap-2">
-        <p className="text-lg font-semibold">Cannot reach the backend</p>
-        <p className="text-sm text-muted-foreground">
-          Make sure{" "}
-          <code className="bg-muted px-1 py-0.5 rounded text-xs">
-            uvicorn main:app --reload --port 8000
-          </code>{" "}
-          is running in the{" "}
-          <code className="bg-muted px-1 py-0.5 rounded text-xs">backend/</code>{" "}
-          folder.
-        </p>
-      </div>
-    );
+    return <ConnectXeroScreen />;
   }
+
+  const [briefing, history, trends, forecast] = await Promise.all([
+    getLatestBriefing(companyId),
+    getBriefings(companyId, 8),
+    getMonthlyTrends(companyId),
+    getForecast(companyId, 12),
+  ]);
 
   const parsed = briefing ? parseBriefingText(briefing.full_briefing) : null;
   const dimensions = briefing ? parseDimensions(briefing.financial_summary) : [];
@@ -48,34 +43,35 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      {/* Page header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{company.name}</h1>
-          <p className="text-sm text-muted-foreground mt-0.5 capitalize">
-            {company.country} · {company.industry}
-          </p>
-        </div>
-        <GenerateButton companyId={COMPANY_ID} />
+      {/* Page header — just the company name. Actions live in the header menu. */}
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">{company.name}</h1>
+        <p className="text-sm text-muted-foreground mt-0.5 capitalize">
+          {company.country} · {company.industry}
+        </p>
       </div>
 
-      {/* Full-width revenue/expense chart at top */}
-      {trends && trends.months.length > 0 && (
-        <RevenueExpenseChart trends={trends} />
-      )}
+      {/* Top row — revenue + cash forecast */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {trends && trends.months.length > 0 && (
+          <RevenueExpenseChart trends={trends} />
+        )}
+        <CashForecastChart forecast={forecast} />
+      </div>
 
       {briefing && parsed ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
 
-          {/* Left — briefing text */}
-          <div className="lg:col-span-2">
+          {/* Left — briefing text + ask-data */}
+          <div className="lg:col-span-2 space-y-6">
             <BriefingSections
               parsed={parsed}
               weekOf={`Week of ${formatDate(briefing.week_of ?? briefing.generated_at)}`}
             />
+            <AskData companyId={companyId} />
           </div>
 
-          {/* Right — scores + history */}
+          {/* Right — scores + benchmarks + history */}
           <div className="space-y-4">
             <HealthScoreCard
               score={briefing.health_score}
@@ -83,8 +79,8 @@ export default async function DashboardPage() {
             />
             <ScoreTrendChart history={history} />
             <DimensionBreakdown dimensions={dimensions} />
+            <BenchmarkCard companyId={companyId} />
 
-            {/* Recent briefings — lives here, not at the bottom */}
             {history.length > 0 && (
               <div className="border rounded-xl overflow-hidden shadow-sm">
                 <div className="flex items-center justify-between px-4 py-3 border-b">
@@ -129,11 +125,9 @@ export default async function DashboardPage() {
         <div className="flex flex-col items-center justify-center py-24 border rounded-xl gap-3">
           <p className="font-semibold">No briefing yet</p>
           <p className="text-sm text-muted-foreground">
-            Click{" "}
-            <span className="font-medium text-foreground">
-              Generate Briefing
-            </span>{" "}
-            above to run the pipeline for the first time.
+            Open the company menu in the header and choose{" "}
+            <span className="font-medium text-foreground">Generate briefing</span>{" "}
+            to run the pipeline for the first time.
           </p>
         </div>
       )}

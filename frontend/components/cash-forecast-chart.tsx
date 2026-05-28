@@ -6,24 +6,25 @@ import {
   ChartContainer,
   ChartTooltip,
   ChartTooltipContent,
-  ChartLegend,
-  ChartLegendContent,
 } from "@/components/ui/chart";
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
-import { MonthlyTrends } from "@/lib/api";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ReferenceLine,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { ForecastResponse } from "@/lib/api";
 
 interface Props {
-  trends: MonthlyTrends | null;
+  forecast: ForecastResponse | null;
 }
 
 const chartConfig = {
-  revenue: {
-    label: "Revenue",
-    color: "hsl(160 60% 45%)", // emerald
-  },
-  expenses: {
-    label: "Expenses",
-    color: "hsl(0 70% 60%)", // red
+  balance: {
+    label: "Projected cash",
+    color: "hsl(220 80% 55%)",
   },
 } satisfies ChartConfig;
 
@@ -33,30 +34,27 @@ function formatCurrency(value: number): string {
   return `€${Math.round(value)}`;
 }
 
-export function RevenueExpenseChart({ trends }: Props) {
-  // Skip months with no data on either side — they render as empty bars
-  // and add visual noise without informing the user.
-  const data = trends
-    ? trends.months
-        .map((m, i) => ({
-          month:    m,
-          revenue:  trends.revenue[i] ?? 0,
-          expenses: trends.expenses[i] ?? 0,
-        }))
-        .filter((d) => d.revenue > 0 || d.expenses > 0)
-    : [];
+/**
+ * Locale-independent thousands separator. We avoid `toLocaleString()` because
+ * it uses the runtime's default locale, which differs between the Node SSR
+ * environment and the browser — causing hydration mismatches.
+ */
+function formatThousands(n: number): string {
+  return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
 
-  if (data.length < 2) {
+export function CashForecastChart({ forecast }: Props) {
+  if (!forecast || forecast.projection.length === 0 || forecast.monthly_burn === 0) {
     return (
       <Card className="shadow-sm">
         <CardHeader className="pb-2">
           <CardTitle className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-            Revenue vs Expenses
+            Cash flow forecast
           </CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-xs text-muted-foreground py-8 text-center">
-            No monthly data available yet. Run a Xero sync to populate.
+            Need cash and burn data to forecast — run a Xero sync first.
           </p>
         </CardContent>
       </Card>
@@ -67,16 +65,35 @@ export function RevenueExpenseChart({ trends }: Props) {
     <Card className="shadow-sm">
       <CardHeader className="pb-2">
         <CardTitle className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-          Revenue vs Expenses · Last {data.length} months
+          Cash flow forecast · Next {forecast.months} months
         </CardTitle>
+        <div className="text-xs text-muted-foreground pt-1">
+          {forecast.exhausted_at ? (
+            <span className="text-red-500 font-medium">
+              Cash runs out around {forecast.exhausted_at}
+            </span>
+          ) : (
+            <span>
+              Cash stays positive throughout the forecast window
+            </span>
+          )}
+          {" · "}
+          burn €{formatThousands(forecast.monthly_burn)}/mo
+        </div>
       </CardHeader>
       <CardContent>
         <ChartContainer config={chartConfig} className="h-[220px] w-full">
-          <BarChart
+          <AreaChart
             accessibilityLayer
-            data={data}
+            data={forecast.projection}
             margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
           >
+            <defs>
+              <linearGradient id="cashGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--color-balance)" stopOpacity={0.4} />
+                <stop offset="100%" stopColor="var(--color-balance)" stopOpacity={0.02} />
+              </linearGradient>
+            </defs>
             <CartesianGrid vertical={false} strokeDasharray="3 3" />
             <XAxis
               dataKey="month"
@@ -96,26 +113,23 @@ export function RevenueExpenseChart({ trends }: Props) {
               fontSize={10}
               tickFormatter={formatCurrency}
             />
+            <ReferenceLine y={0} stroke="hsl(0 70% 60%)" strokeDasharray="3 3" />
             <ChartTooltip
-              cursor={{ fill: "hsl(var(--muted))", opacity: 0.3 }}
+              cursor={{ stroke: "hsl(var(--muted))" }}
               content={
                 <ChartTooltipContent
                   formatter={(value) => formatCurrency(value as number)}
                 />
               }
             />
-            <ChartLegend content={<ChartLegendContent />} />
-            <Bar
-              dataKey="revenue"
-              fill="var(--color-revenue)"
-              radius={[3, 3, 0, 0]}
+            <Area
+              type="monotone"
+              dataKey="balance"
+              stroke="var(--color-balance)"
+              strokeWidth={2}
+              fill="url(#cashGradient)"
             />
-            <Bar
-              dataKey="expenses"
-              fill="var(--color-expenses)"
-              radius={[3, 3, 0, 0]}
-            />
-          </BarChart>
+          </AreaChart>
         </ChartContainer>
       </CardContent>
     </Card>

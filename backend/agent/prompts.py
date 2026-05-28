@@ -47,6 +47,11 @@ OUTPUT FORMAT — follow exactly, including the section headers
 3. REGULATORY UPDATES: only changes relevant to THIS company. If the retrieved regulations don't actually affect them, write "No new regulatory action needed this week." rather than padding.
 4. THIS WEEK'S ACTIONS: maximum 5 items, each with a concrete deadline.
 
+FORMATTING RULES — these are strict
+- Plain text only. No markdown. No "#", "##", "###" headers. No "**bold**" or "*italic*". No "---" separators.
+- Use the section headers in plain uppercase exactly as written above (FINANCIAL ALERTS, REGULATORY UPDATES, THIS WEEK'S ACTIONS). Nothing else around them.
+- Action items are numbered (1., 2., 3.), nothing fancier.
+
 NEVER
 - Recommend doing nothing as an action item.
 - Produce a briefing that could apply to any other company.

@@ -130,6 +130,31 @@ def get_tenant_id(access_token):
     return tenants[0]["tenantId"]
 
 
+def get_tenant_info(access_token):
+    """
+    Returns (tenant_id, tenant_name) for the first organisation connected.
+    Used on first-connect so we can save the company under its real name
+    instead of a placeholder like "Xero Demo Company".
+    """
+    response = requests.get(
+        XERO_TENANT_URL,
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=15,
+    )
+
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"Could not retrieve tenant ({response.status_code}): {response.text}"
+        )
+
+    tenants = response.json()
+    if not tenants:
+        raise RuntimeError("No Xero organisations found for this account.")
+
+    first = tenants[0]
+    return first["tenantId"], first.get("tenantName") or "Connected Xero Company"
+
+
 # ---------------------------------------------------------------------------
 # Step 4 — Save tokens to Supabase
 # ---------------------------------------------------------------------------

@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { getCompany, getBriefings, formatDate, scoreColor } from "@/lib/api";
-
-const COMPANY_ID = process.env.NEXT_PUBLIC_COMPANY_ID ?? "";
+import { getActiveCompanyId } from "@/lib/company";
 
 export default async function BriefingsPage() {
+  const companyId = await getActiveCompanyId();
   const [company, briefings] = await Promise.all([
-    getCompany(COMPANY_ID),
-    getBriefings(COMPANY_ID, 50),
+    getCompany(companyId),
+    getBriefings(companyId, 50),
   ]);
 
   return (

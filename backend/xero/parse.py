@@ -89,6 +89,41 @@ def _all_cell_values(rows, title):
 
 
 # ---------------------------------------------------------------------------
+# Monthly-burn calculation (multi-strategy)
+# ---------------------------------------------------------------------------
+
+def _compute_monthly_burn(pl_data):
+    """
+    Returns a monthly burn estimate in EUR/month, or None if no reasonable
+    estimate can be produced. Tries, in order:
+
+      1. Average of last 3 non-zero months in monthly_expense_trend
+      2. operating_expenses (total) divided by number of non-zero months
+      3. (annual_revenue - net_profit) / 12   ← rough proxy if expense row missing
+    """
+    trend = pl_data.get("monthly_expense_trend") or []
+    non_zero = [v for v in trend if v and abs(v) > 0]
+
+    if non_zero:
+        recent = non_zero[-3:]
+        return round(sum(recent) / len(recent), 2)
+
+    opex = pl_data.get("operating_expenses")
+    if opex and opex > 0:
+        n_months = len([v for v in trend if v is not None]) or 12
+        return round(abs(opex) / n_months, 2)
+
+    revenue = pl_data.get("annual_revenue")
+    net     = pl_data.get("net_profit")
+    if revenue and net is not None:
+        implied_expenses = revenue - net
+        if implied_expenses > 0:
+            return round(implied_expenses / 12, 2)
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # P&L parser
 # ---------------------------------------------------------------------------
 
@@ -105,11 +140,16 @@ def _parse_pl(pl_raw):
     data   = {}
 
     # Revenue
+    # Xero returns monthly columns in REVERSE chronological order (newest first).
+    # Every downstream consumer (burn calc, trend scoring, chart) assumes the
+    # opposite, so we reverse here once and everything else works correctly.
     revenue_row = _find_row_by_title(rows, "Total Income") or \
                   _find_row_by_title(rows, "Total Revenue") or \
                   _find_row_by_title(rows, "Income")
     if revenue_row:
-        monthly_revenues = _all_cell_values(rows, revenue_row["Cells"][0]["Value"])
+        monthly_revenues = list(reversed(
+            _all_cell_values(rows, revenue_row["Cells"][0]["Value"])
+        ))
         data["monthly_revenue_trend"] = monthly_revenues
         data["annual_revenue"]        = sum(monthly_revenues) if monthly_revenues else None
     else:
@@ -138,12 +178,24 @@ def _parse_pl(pl_raw):
         data["gross_margin_pct"] = None
         errors.append("gross_margin_pct: missing gross_profit or annual_revenue")
 
-    # Operating expenses
-    opex_row = _find_row_by_title(rows, "Total Operating Expenses") or \
-               _find_row_by_title(rows, "Total Expenses") or \
-               _find_row_by_title(rows, "Operating Expenses")
+    # Operating expenses — Xero's row title varies between localisations and
+    # report types, so we try several known headers.
+    opex_row = (
+        _find_row_by_title(rows, "Total Operating Expenses")
+        or _find_row_by_title(rows, "Total Less Operating Expenses")
+        or _find_row_by_title(rows, "Less Operating Expenses")
+        or _find_row_by_title(rows, "Total Expenses")
+        or _find_row_by_title(rows, "Operating Expenses")
+    )
     if opex_row:
-        monthly_expenses = _all_cell_values(rows, opex_row["Cells"][0]["Value"])
+        # Reverse Xero's newest-first column order so the trend reads
+        # oldest → newest, matching the revenue trend and chart.
+        monthly_expenses = list(reversed(
+            _all_cell_values(rows, opex_row["Cells"][0]["Value"])
+        ))
+        # Xero sometimes reports expense rows as negative; we want positive
+        # outflow figures for the burn calculation and the chart.
+        monthly_expenses = [abs(v) for v in monthly_expenses]
         data["monthly_expense_trend"] = monthly_expenses
         data["operating_expenses"]    = sum(monthly_expenses) if monthly_expenses else _cell_value(opex_row)
     else:
@@ -151,12 +203,10 @@ def _parse_pl(pl_raw):
         data["operating_expenses"]    = None
         errors.append("operating_expenses: could not find Total Expenses row")
 
-    # Monthly burn = average monthly operating expenses over last 3 months
-    if data["monthly_expense_trend"]:
-        recent = data["monthly_expense_trend"][-3:]
-        data["monthly_burn"] = round(sum(recent) / len(recent), 2)
-    else:
-        data["monthly_burn"] = None
+    # Monthly burn — average operating expenses over the last 3 months with
+    # non-zero data. Empty/zero months are skipped so a half-populated trend
+    # doesn't dilute the estimate. Multiple fallbacks if the trend is missing.
+    data["monthly_burn"] = _compute_monthly_burn(data)
 
     # Net profit
     np_row = _find_row_by_title(rows, "Net Profit") or \

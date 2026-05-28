@@ -105,6 +105,50 @@ export async function getBriefings(
   }
 }
 
+/**
+ * Lightweight poll helpers used by the progress banner. Both return null on
+ * failure or when the row doesn't exist yet (a fresh install with no data).
+ */
+
+export interface LatestRef {
+  id:         string | null;
+  generated_at?: string;
+  pulled_at?:    string;
+}
+
+export async function getLatestBriefingRef(
+  companyId: string
+): Promise<LatestRef | null> {
+  try {
+    const res = await fetch(
+      `${API_URL}/companies/${companyId}/briefings?limit=1`,
+      { cache: "no-store" }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const first = data.briefings?.[0];
+    if (!first) return { id: null };
+    return { id: first.id, generated_at: first.generated_at };
+  } catch {
+    return null;
+  }
+}
+
+export async function getLatestSnapshotRef(
+  companyId: string
+): Promise<LatestRef | null> {
+  try {
+    const res = await fetch(
+      `${API_URL}/companies/${companyId}/snapshots/latest`,
+      { cache: "no-store" }
+    );
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
 export async function getBriefingById(
   companyId: string,
   briefingId: string
@@ -154,11 +198,176 @@ export async function generateBriefing(companyId: string): Promise<boolean> {
   }
 }
 
+// ── Companies list (multi-company switcher) ────────────────────────────────
+
+export interface CompanyListItem {
+  id: string;
+  name: string;
+  industry?: string;
+  country?: string;
+}
+
+export async function listCompanies(): Promise<CompanyListItem[]> {
+  try {
+    const res = await fetch(`${API_URL}/companies`, { cache: "no-store" });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.companies ?? [];
+  } catch {
+    return [];
+  }
+}
+
+// ── Benchmarks ─────────────────────────────────────────────────────────────
+
+export interface BenchmarkItem {
+  key: string;
+  label: string;
+  value: number | null;
+  unit: string;
+  higher_is_better: boolean;
+  thresholds: { good: number; average: number; poor: number } | null;
+}
+
+export interface BenchmarkResponse {
+  industry: string;
+  country: string;
+  items: BenchmarkItem[];
+}
+
+export async function getBenchmarks(
+  companyId: string
+): Promise<BenchmarkResponse | null> {
+  try {
+    const res = await fetch(`${API_URL}/companies/${companyId}/benchmarks`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+// ── Cash flow forecast ─────────────────────────────────────────────────────
+
+export interface ForecastPoint {
+  month: string;
+  balance: number;
+  negative: boolean;
+}
+
+export interface ForecastResponse {
+  starting_cash: number;
+  monthly_burn: number;
+  months: number;
+  projection: ForecastPoint[];
+  exhausted_at: string | null;
+}
+
+export async function getForecast(
+  companyId: string,
+  months = 12
+): Promise<ForecastResponse | null> {
+  try {
+    const res = await fetch(
+      `${API_URL}/companies/${companyId}/forecast?months=${months}`,
+      { cache: "no-store" }
+    );
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+// ── Xero connect / reconnect ───────────────────────────────────────────────
+
+/**
+ * Returns the Xero auth URL. If companyId is provided, the callback updates
+ * that company's tokens. If omitted, the callback creates a new company.
+ */
+export async function getXeroAuthUrl(
+  companyId?: string | null
+): Promise<string | null> {
+  try {
+    const url = companyId
+      ? `${API_URL}/xero/connect?company_id=${companyId}`
+      : `${API_URL}/xero/connect`;
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.auth_url ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteCompany(companyId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_URL}/companies/${companyId}`, {
+      method: "DELETE",
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// ── Ask-your-data chat ─────────────────────────────────────────────────────
+
+export async function askQuestion(
+  companyId: string,
+  question: string
+): Promise<string | null> {
+  try {
+    const res = await fetch(`${API_URL}/companies/${companyId}/ask`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ question }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.answer ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function syncXero(companyId: string): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `${API_URL}/companies/${companyId}/sync`,
+      { method: "POST" }
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Next Monday at 07:00 Amsterdam time as an ISO-ish string for display.
+ * Matches the APScheduler cron in backend/main.py.
+ */
+export function nextScheduledRun(): Date {
+  const now = new Date();
+  const next = new Date(now);
+  // Days until next Monday (1 = Monday). 0 means today is Monday.
+  const day = now.getDay();
+  const daysUntilMon = day === 1 ? (now.getHours() < 7 ? 0 : 7) : (8 - day) % 7 || 7;
+  next.setDate(now.getDate() + daysUntilMon);
+  next.setHours(7, 0, 0, 0);
+  return next;
+}
+
 // ── Parsers ────────────────────────────────────────────────────────────────
 
 /**
  * Splits the LLM briefing text into its four named sections.
- * Handles minor variations in header formatting (trailing colon, whitespace).
+ * Handles minor variations in header formatting (trailing colon, whitespace)
+ * and strips stray markdown (## headers, **bold**, etc.) that the model
+ * sometimes adds despite the system-prompt rules.
  */
 export function parseBriefingText(text: string): ParsedBriefing {
   const FA  = "FINANCIAL ALERTS";
@@ -166,19 +375,38 @@ export function parseBriefingText(text: string): ParsedBriefing {
   const ACT = "THIS WEEK'S ACTIONS";
 
   const faIdx  = text.indexOf(FA);
-  if (faIdx === -1) return { summary: text, financialAlerts: "", regulatoryUpdates: "", actions: "" };
+  if (faIdx === -1) {
+    return { summary: cleanMarkdown(text), financialAlerts: "", regulatoryUpdates: "", actions: "" };
+  }
 
   const ruIdx  = text.indexOf(RU,  faIdx);
   const actIdx = text.indexOf(ACT, faIdx);
 
-  const strip = (s: string) => s.replace(/^[:\s]+/, "").trim();
+  const strip = (s: string) => cleanMarkdown(s.replace(/^[:\s]+/, ""));
 
-  const summary          = text.slice(0, faIdx).trim();
+  const summary          = cleanMarkdown(text.slice(0, faIdx));
   const financialAlerts  = strip(text.slice(faIdx + FA.length,  ruIdx  > -1 ? ruIdx  : actIdx > -1 ? actIdx : undefined));
   const regulatoryUpdates = ruIdx > -1 ? strip(text.slice(ruIdx + RU.length,  actIdx > -1 ? actIdx : undefined)) : "";
   const actions           = actIdx > -1 ? strip(text.slice(actIdx + ACT.length)) : "";
 
   return { summary, financialAlerts, regulatoryUpdates, actions };
+}
+
+/**
+ * Removes leftover markdown noise from LLM output:
+ *   - Standalone "##" / "###" lines (used as separators between sections)
+ *   - Leading "#" runs on the first line
+ *   - Trailing "#" runs on the last line
+ *   - **bold** wrappers (kept text, dropped asterisks)
+ */
+function cleanMarkdown(s: string): string {
+  return s
+    .replace(/^\s*#+\s*$/gm, "")     // standalone ## or ### lines
+    .replace(/^\s*#+\s+/, "")        // leading "## " on first line
+    .replace(/\s*#+\s*$/, "")        // trailing "##" at very end
+    .replace(/\*\*(.+?)\*\*/g, "$1") // **bold** → bold
+    .replace(/\n{3,}/g, "\n\n")      // collapse runs of blank lines
+    .trim();
 }
 
 /**
